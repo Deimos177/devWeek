@@ -1,17 +1,24 @@
-const { v4: uuidv4 } = require('uuid')
+const {
+  v4: uuidv4
+} = require('uuid')
 
 require('../resources/db/connection')()
+
+const draw = require('../utils/draw')
 
 const secretModel = require('../resources/db/models/secret')
 
 module.exports.create = async (event, context) => {
   context.callbacksWaitsForEmptyEventLoop = false
 
-  const { name, email } = JSON.parse(event.body)
+  const {
+    name,
+    email
+  } = JSON.parse(event.body)
   const externalId = uuidv4()
   const adminKey = uuidv4()
 
-  try{
+  try {
     await secretModel.create({
       owner: name,
       ownerEmail: email,
@@ -27,7 +34,7 @@ module.exports.create = async (event, context) => {
         adminKey
       })
     }
-  }catch(error){
+  } catch (error) {
     return {
       statusCode: 500,
       body: JSON.stringify({
@@ -39,11 +46,17 @@ module.exports.create = async (event, context) => {
 module.exports.get = async (event, context) => {
   context.callbacksWaitsForEmptyEventLoop = false
 
-  const { id: externalId } = event.pathParameters
+  const {
+    id: externalId
+  } = event.pathParameters
   const incomingAdminKey = event.headers['adminKey']
 
-  try{
-    const { participants, adminKey, drawResults } = await secretModel.findOne({ 
+  try {
+    const {
+      participants,
+      adminKey,
+      drawResults
+    } = await secretModel.findOne({
       externalId
     }).select('-_id participants adminKey drawResults').lean()
 
@@ -57,12 +70,12 @@ module.exports.get = async (event, context) => {
 
     return {
       statusCode: 200,
-      body : JSON.stringify({
+      body: JSON.stringify({
         result
       })
     }
 
-  }catch(error){
+  } catch (error) {
     console.log(error)
     return {
       statusCode: 500,
@@ -75,22 +88,47 @@ module.exports.get = async (event, context) => {
 module.exports.draw = async (event, context) => {
   context.callbacksWaitsForEmptyEventLoop = false
 
-  const { id: externalId } = event.pathParameters
+  const {
+    id: externalId
+  } = event.pathParameters
   const adminKey = event.headers['admin-key']
 
-  try{
+  try {
     const secret = await secretModel.findOne({
       externalId,
       adminKey
     }).select('participants ownerEmail').lean()
 
-    if(!secret){
+    if (!secret) {
       throw new Error()
     }
 
-    
+    const drawResult = draw(secret.participants)
+    const drawMap = drawResult.map((result) => {
+      return {
+        giver: result.giver.externalId,
+        receiver: result.receiver.externalId
+      }
+    })
 
-  }catch(error){
+    await secretModel.updateOne(
+      {
+        _id: secret._id,
+      },
+      {
+        drawResults: drawMap
+      }
+    )
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        drawResult,
+        success: true
+      })
+    }
+
+  } catch (error) {
     return {
       statusCode: 500,
       body: JSON.stringify({
